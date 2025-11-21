@@ -56,6 +56,11 @@ class AppDatabase {
           final d = await db;
           await services_dao.migrateServicesTable(d);
         } catch (_) {}
+        // مهاجرت schema برای sales (اضافه کردن ستونهایی مانند title)
+        try {
+          final d = await db;
+          await _migrateSalesSchema(d);
+        } catch (_) {}
         return;
       }
     } catch (_) {}
@@ -76,6 +81,11 @@ class AppDatabase {
           final d = await db;
           await services_dao.migrateServicesTable(d);
         } catch (_) {}
+        // migrate sales schema
+        try {
+          final d = await db;
+          await _migrateSalesSchema(d);
+        } catch (_) {}
         return;
       } catch (_) {}
     }
@@ -87,6 +97,11 @@ class AppDatabase {
       try {
         final d = await db;
         await services_dao.migrateServicesTable(d);
+      } catch (_) {}
+      // migrate sales schema
+      try {
+        final d = await db;
+        await _migrateSalesSchema(d);
       } catch (_) {}
       return;
     } catch (e) {
@@ -176,6 +191,11 @@ class AppDatabase {
           await inventory_dao.createInventoryTables(db);
           await warehouses_dao.createWarehousesTable(db);
           await sales_dao.createSalesTables(db);
+
+          // اجرای مهاجرت schema مرتبط با sales (عنوان و ستون‌های جدید) در ایجاد اولیه
+          try {
+            await _migrateSalesSchema(db);
+          } catch (_) {}
 
           // ایجاد جدول services هم در ایجاد اولیه (اگر DAOs/services وجود داشته باشد)
           try {
@@ -270,6 +290,11 @@ class AppDatabase {
             await sales_dao.migrateSalesTables(db);
           } catch (_) {}
 
+          // اجرای مهاجرت schema برای sales (در صورت نبودن ستون های جدید)
+          try {
+            await _migrateSalesSchema(db);
+          } catch (_) {}
+
           // اطمینان از وجود جداول جدید (در صورت DBهای قدیمی)
           await _ensureReturnsAndProfitTables();
           try {
@@ -348,6 +373,44 @@ class AppDatabase {
     }
   }
 
+  // ================= Migration: sales schema =================
+  // اضافه کردن ستون‌های ضروری به جدول sales اگر وجود ندارند (محافظه‌کارانه)
+  static Future<void> _migrateSalesSchema(Database db) async {
+    try {
+      final info = await db.rawQuery("PRAGMA table_info('sales')");
+      final existingCols = <String>{};
+      for (final r in info) {
+        final name = (r['name'] ?? r['column_name'])?.toString();
+        if (name != null) existingCols.add(name.toLowerCase());
+      }
+
+      // ستون‌هایی که نسخهٔ جدید UI و DAOها انتظار دارند
+      final needed = <String, String>{
+        'title': 'TEXT',
+        'subtotal': 'REAL',
+        'discount': 'REAL',
+        'tax': 'REAL',
+        'extra_charges': 'REAL',
+        'notes': 'TEXT',
+        'created_at': 'INTEGER',
+      };
+
+      for (final entry in needed.entries) {
+        final col = entry.key;
+        final def = entry.value;
+        if (!existingCols.contains(col.toLowerCase())) {
+          try {
+            await db.execute("ALTER TABLE sales ADD COLUMN $col $def");
+          } catch (_) {
+            // در برخی نسخه‌های sqlite یا شرایط خاص ALTER ممکن است خطا بدهد؛ نادیده می‌گیریم تا init متوقف نشود
+          }
+        }
+      }
+    } catch (_) {
+      // نادیده گرفتن خطا تا اجرای init متوقف نشود
+    }
+  }
+
   // ---------- تغییر یا تعیین مسیر دیتابیس (استفاده داخلی) ----------
   static Future<void> setDbPath(String fullPath) async {
     Database? newDb;
@@ -375,6 +438,12 @@ class AppDatabase {
           await inventory_dao.createInventoryTables(db);
           await warehouses_dao.createWarehousesTable(db);
           await sales_dao.createSalesTables(db);
+
+          // مهاجرت schema sales هنگام ایجاد دیتابیس جدید (اضافه کردن ستون‌های مورد نیاز)
+          try {
+            await _migrateSalesSchema(db);
+          } catch (_) {}
+
           // ایجاد جدول services نیز در onCreate
           try {
             await services_dao.createServicesTable(db);
@@ -470,6 +539,11 @@ class AppDatabase {
           } catch (_) {}
           try {
             await sales_dao.migrateSalesTables(db);
+          } catch (_) {}
+
+          // اجرای مهاجرت schema برای sales در زمان open (برای DBهای قدیمی)
+          try {
+            await _migrateSalesSchema(db);
           } catch (_) {}
 
           await _ensureReturnsAndProfitTables();
@@ -1118,11 +1192,8 @@ class AppDatabase {
             perc = _toDouble(sp);
           } else {
             try {
-              final pid = (p['id'] is int)
-                  ? p['id'] as int
-                  : int.tryParse(p['id']?.toString() ?? '') ?? 0;
-              final sp2 = await persons_meta_dao.getPersonSharePercentage(
-                  await db, pid);
+              final pid = (p['id'] is int) ? p['id'] as int : int.tryParse(p['id']?.toString() ?? '') ?? 0;
+              final sp2 = await persons_meta_dao.getPersonSharePercentage(d, pid);
               perc = sp2;
             } catch (_) {}
           }
