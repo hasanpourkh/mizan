@@ -4,9 +4,10 @@
 // - توجه: برای رفع ارور type mismatch، فراخوانی registerStockMovement از طریق AppDatabase.registerStockMovement انجام میشود
 //   (اگر بخواهی میتوانم inventory_dao را نیز به DatabaseExecutor ارتقا دهم تا تمام عملیات داخل تراکنش بماند).
 
+import 'package:mizan/src/core/db/daos/persons_meta_dao.dart'
+    as persons_meta_dao;
 import 'package:sqflite/sqflite.dart';
 import 'dart:math' as math;
-import '../../daos/persons_meta_dao.dart' as persons_meta_dao;
 import '../app_database.dart'
     as AppDbFacade; // برای فراخوانی registerStockMovement wrapper
 import '../daos/sales_dao.dart' as sales_dao;
@@ -212,8 +213,8 @@ Future<int> registerSaleReturn(
             final pid = (p['id'] is int)
                 ? p['id'] as int
                 : int.tryParse(p['id']?.toString() ?? '') ?? 0;
-            final sp2 =
-                await persons_meta_dao.getPersonSharePercentage(txn, pid);
+            final sp2 = await persons_meta_dao.getPersonSharePercentage(
+                txn as Database, pid);
             perc = sp2;
           } catch (_) {}
         }

@@ -1,10 +1,8 @@
 // lib/src/app.dart
 // ورودی اپ: تعریف Theme و تمامی مسیرها (routes).
-// تغییرات این نسخه:
-// - افزودن مسیر '/products/update-prices' که قبلاً بعضی منوها به آن رجوع می‌کردند.
-// - اصلاح مسیر '/purchases/new' تا به کلاس صحیح ReceivePage اشاره کند.
-// - ساختار و بقیهٔ routeها بدون تغییر حفظ شده‌اند.
-// توضیح خیلی خیلی کوتاه: این فایل را جایگزین کن و اپ را پاکسازی و از اول بیلد کن.
+// توضیح خیلی خیلی کوتاه: این نسخه از app.dart مسیر P&L را فعلاً به Placeholder امن هدایت میکند
+// تا ارور type مربوط به PnlPage برطرف شود. پس از بیلد موفق، محتوای فایل lib/src/pages/reports/pnl_page.dart
+// را برای من بفرست تا صفحهٔ واقعی را مستقیم وصل کنم.
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -44,7 +42,7 @@ import 'pages/purchases/receive_page.dart' as purchases_receive;
 import 'pages/products/new_product_page.dart' as products_new;
 import 'pages/products/products_list_page.dart' as products_list;
 import 'pages/products/price_update/price_update_page.dart'
-    as products_price_update; // صفحهٔ به‌روزرسانی قیمت‌ها
+    as products_price_update; // صفحهٔ بهروزرسانی قیمتها
 
 // صفحات settings:update
 import 'pages/settings/update_page.dart' as settings_update;
@@ -58,11 +56,14 @@ import 'pages/sales/sales_list_page.dart' as sales_list;
 import 'pages/sales/returns/returns_list_page.dart' as sales_returns;
 import 'pages/sales/returns/new_return_page.dart' as sales_returns_new;
 
-// صفحات گزارش/داشبورد (در صورت نیاز قابل جایگزینی با صفحات واقعی)
+// صفحات گزارش/داشبورد (در آینده PnlPage متصل خواهد شد)
 import 'pages/dashboard/dashboard_page.dart' as dashboard_page;
 import 'pages/sales/profit_shares_page.dart' as sales_profit_shares;
 import 'pages/sales/profit_adjust_page.dart' as sales_profit_adjust;
-import 'pages/reports/pnl_page.dart' as reports_pnl;
+
+// صفحات سرویس (خدمت) — اگر مسیر یا نام کلاس متفاوت است اطلاع بده
+import 'pages/services/new_service_page.dart' as services_new; // NewServicePage
+import 'pages/services/services_list_page.dart' as services_list; // ServicesListPage
 
 // AppNavigator برای navigatorKey
 import 'core/navigation/app_navigator.dart';
@@ -199,14 +200,11 @@ class MyApp extends StatelessWidget {
           '/products/price-update': (context) => MainLayout(
               child: products_price_update.PriceUpdatePage(),
               currentRoute: '/products/price-update'),
-
-          // اضافه: مسیری که منو به آن اشاره می‌کند (رفع ارور Route)
           '/products/update-prices': (context) => MainLayout(
               child: products_price_update.PriceUpdatePage(),
               currentRoute: '/products/update-prices'),
 
           // purchases / stock routes
-          // اصلاح: مسیر به کلاس صحیح ReceivePage ارجاع داده شد
           '/purchases/new': (context) => MainLayout(
               child: purchases_receive.ReceivePage(),
               currentRoute: '/purchases/new'),
@@ -217,6 +215,14 @@ class MyApp extends StatelessWidget {
           '/stock/inventory': (context) => MainLayout(
               child: stock_inventory.InventoryPage(),
               currentRoute: '/stock/inventory'),
+
+          // services (خدمت)
+          '/services/list': (context) => MainLayout(
+              child: services_list.ServicesListPage(),
+              currentRoute: '/services/list'),
+          '/services/new': (context) => MainLayout(
+              child: services_new.NewServicePage(),
+              currentRoute: '/services/new'),
 
           // sales routes
           '/sales/quick': (context) => MainLayout(
@@ -234,18 +240,12 @@ class MyApp extends StatelessWidget {
               child: sales_returns_new.NewReturnPage(),
               currentRoute: '/sales/returns/new'),
 
-          // گزارش / داشبورد (در صورت نبودن صفحات واقعی، Placeholder نمایش داده میشود)
+          // گزارش / داشبورد (فعلاً Placeholder امن برای P&L)
           '/sales/profit-shares': (context) => MainLayout(
-              child: const SimplePlaceholder(
-                  title: 'سود و زیان سهامداران',
-                  subtitle:
-                      'صفحهٔ گزارش/تخصیص سود سهامداران در صورت نبود پیاده‌سازی نمایش داده شده'),
+              child: sales_profit_shares.ProfitSharesPage(),
               currentRoute: '/sales/profit-shares'),
           '/sales/profit-adjust': (context) => MainLayout(
-              child: const SimplePlaceholder(
-                  title: 'تعدیل سود سهامداران',
-                  subtitle:
-                      'صفحهٔ تعدیل در صورت نبود پیاده‌سازی نمایش داده می‌شود'),
+              child: sales_profit_adjust.ProfitAdjustPage(),
               currentRoute: '/sales/profit-adjust'),
           '/reports/pnl': (context) => MainLayout(
               child: const SimplePlaceholder(

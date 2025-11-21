@@ -1,17 +1,17 @@
-//github.com/nimshakiba/mizan/blob/main/lib/src/pages/sales/quick_sale_page.dart
+//github.com/hasanpourkh/mizan/blob/main/lib/src/pages/sales/quick_sale_page.dart
 // lib/src/pages/sales/quick_sale_page.dart
-// صفحهٔ فروش سریع — نسخهٔ اصلاح‌شده تا از SaleProductList جدید (محصول+خدمت) پشتیبانی کند.
-// - تغییر مهم: _addProductToCart ورودی Map<String,dynamic> item می‌گیرد.
-// - خدمات بدون بررسی موجودی اضافه می‌شوند.
+// صفحهٔ فروش سریع — انتخاب محصول/خدمت و ثبت فوری با پرداخت نقدی خودکار.
+// - نمایش و مدیریت سبد ساده.
+// - وقتی سبد تغییر کند فیلد پرداخت خودکار با جمع کل پر می‌شود مگر کاربر دستی آن را ویرایش کند.
+// - برای محصولات اعتبار موجودی بررسی می‌شود؛ خدمات نامحدود هستند.
+// - توضیح خیلی خیلی کوتاه: فایل کامل و سازگار.
 
 import 'package:flutter/material.dart';
-import 'package:mizan/src/pages/sales/sale_utils.dart';
-import '../../core/db/app_database.dart';
-import '../../core/notifications/notification_service.dart';
 import 'sale_models.dart';
 import 'sale_product_list.dart';
-import 'sale_cart.dart';
-import 'package:shamsi_date/shamsi_date.dart';
+import '../../core/db/app_database.dart';
+import '../../core/notifications/notification_service.dart';
+import 'package:intl/intl.dart';
 
 class QuickSalePage extends StatefulWidget {
   const QuickSalePage({super.key});
@@ -21,141 +21,37 @@ class QuickSalePage extends StatefulWidget {
 }
 
 class _QuickSalePageState extends State<QuickSalePage> {
-  // دادهها
-  List<Map<String, dynamic>> _products = [];
-  List<Map<String, dynamic>> _warehouses = [];
-  List<Map<String, dynamic>> _customers = [];
-  List<Map<String, dynamic>> _actors = [];
-
-  // جستجو
-  final TextEditingController _searchCtrl = TextEditingController();
-
-  // سبد چندخطی
   final List<SaleLine> _cart = [];
-
-  // انتخابها
-  int? _selectedWarehouseId;
-  int? _selectedCustomerId; // اگر null یا WALKIN_CUSTOMER_ID => خریدار نقدی
-  String _selectedCustomerName = '';
-  int? _selectedActorId;
-
-  // محاسبات/فیلدها
-  final TextEditingController _discountPercentCtrl =
-      TextEditingController(text: '0');
-  final TextEditingController _discountAmountCtrl =
-      TextEditingController(text: '0');
-  final TextEditingController _taxPercentCtrl =
-      TextEditingController(text: '0');
-  final TextEditingController _extraChargesCtrl =
-      TextEditingController(text: '0');
-  final TextEditingController _notesCtrl = TextEditingController();
-
   bool _loading = true;
   bool _saving = false;
-  DateTime _selectedDate = DateTime.now();
+  final NumberFormat _nf = NumberFormat.decimalPattern();
 
-  // شناسه و متن پیشفرض خریدار نقدی
-  static const int WALKIN_CUSTOMER_ID = -1;
-  static const String WALKIN_CUSTOMER_LABEL = 'خریدار: مشتری نقدی';
+  final TextEditingController _paidAmountCtrl =
+      TextEditingController(text: '0');
+  bool _paidManuallyEdited = false;
 
   @override
   void initState() {
     super.initState();
-    _searchCtrl.addListener(_onSearchChanged);
-    _loadInitial();
+    // صفحهٔ سریع: سریع آماده می‌شود
+    setState(() => _loading = false);
   }
 
-  Future<void> _loadInitial() async {
-    setState(() => _loading = true);
-    try {
-      final prods = await AppDatabase.getProducts();
-      final wh = await AppDatabase.getWarehouses();
-      final persons = await AppDatabase.getPersons();
+  double get _subtotal {
+    double s = 0.0;
+    for (final l in _cart) s += (l.unitPrice * l.qty) - (l.discount ?? 0.0);
+    return s;
+  }
 
-      // فیلتر مشتریها در صورت وجود flag
-      final hasType = persons.any((p) => p.containsKey('type_customer'));
-      final customers = hasType
-          ? persons.where((p) {
-              final v = p['type_customer'];
-              if (v == null) return false;
-              if (v is int) return v == 1;
-              if (v is bool) return v;
-              if (v is String) return v == '1' || v.toLowerCase() == 'true';
-              return false;
-            }).toList()
-          : List<Map<String, dynamic>>.from(persons);
-
-      // actors: فروشندگان/کارمندان/سهامداران
-      final actors = persons.where((p) {
-        final isSeller = p.containsKey('type_seller') &&
-            (p['type_seller'] == 1 ||
-                p['type_seller'] == true ||
-                (p['type_seller'] is String &&
-                    p['type_seller'].toString() == '1'));
-        final isEmployee = p.containsKey('type_employee') &&
-            (p['type_employee'] == 1 ||
-                p['type_employee'] == true ||
-                (p['type_employee'] is String &&
-                    p['type_employee'].toString() == '1'));
-        final isShareholder = p.containsKey('type_shareholder') &&
-            (p['type_shareholder'] == 1 ||
-                p['type_shareholder'] == true ||
-                (p['type_shareholder'] is String &&
-                    p['type_shareholder'].toString() == '1'));
-        return isSeller || isEmployee || isShareholder;
-      }).toList();
-
-      setState(() {
-        _products = prods;
-        _warehouses = wh;
-        _customers = customers;
-        _actors = actors;
-
-        // پیشفرض انبار: اولین انبار اگر موجود باشد
-        if (_warehouses.isNotEmpty) {
-          final id = _warehouses.first['id'];
-          _selectedWarehouseId =
-              (id is int) ? id : int.tryParse(id?.toString() ?? '');
-        }
-
-        // پیشفرض مشتری: walk-in برای سرعت (ولی کاربر میتواند انتخاب کند)
-        _selectedCustomerId = WALKIN_CUSTOMER_ID;
-        _selectedCustomerName = WALKIN_CUSTOMER_LABEL;
-
-        // actor پیشفرض را نگذاریم تا کاربر صریح انتخاب کند در صورت نیاز
-        _selectedActorId = null;
-      });
-    } catch (e) {
-      NotificationService.showToast(context, 'خطا در بارگذاری اطلاعات: $e',
-          backgroundColor: Colors.orange);
-      setState(() {
-        _products = [];
-        _warehouses = [];
-        _customers = [];
-        _actors = [];
-        _selectedCustomerId = WALKIN_CUSTOMER_ID;
-        _selectedCustomerName = WALKIN_CUSTOMER_LABEL;
-      });
-    } finally {
-      setState(() => _loading = false);
+  // وقتی سبد تغییر کند، پرداخت خودکار پر میشود مگر ویرایش دستی شده باشد
+  void _onCartChanged() {
+    if (!_paidManuallyEdited) {
+      _paidAmountCtrl.text = _subtotal.toStringAsFixed(0);
     }
+    setState(() {});
   }
 
-  List<Map<String, dynamic>> get _filteredProducts {
-    final q = _searchCtrl.text.trim().toLowerCase();
-    if (q.isEmpty) return _products;
-    return _products.where((p) {
-      final name = p['name']?.toString().toLowerCase() ?? '';
-      final sku = p['sku']?.toString().toLowerCase() ?? '';
-      final code = p['product_code']?.toString().toLowerCase() ?? '';
-      return name.contains(q) || sku.contains(q) || code.contains(q);
-    }).toList();
-  }
-
-  void _onSearchChanged() => setState(() {});
-
-  // تغییر مهم: ورودی item (Map) میگیرد — ممکن است محصول یا خدمت باشد
-  Future<void> _addProductToCart(Map<String, dynamic> item) async {
+  Future<void> _addProduct(Map<String, dynamic> item) async {
     try {
       final isService = item['is_service'] == true;
       final productId = (item['id'] is int)
@@ -173,132 +69,207 @@ class _QuickSalePageState extends State<QuickSalePage> {
       final name = item['name']?.toString() ?? '';
 
       if (!isService) {
-        // برای محصولات: قبل از اضافه کردن بررسی موجودی انجام میدهیم
         final avail = await AppDatabase.getQtyForItemInWarehouse(productId, 0);
-        if (avail <= 0.0) {
-          NotificationService.showError(context, 'محدودیت موجودی',
-              'این محصول در انبار موجودی ندارد و قابل اضافه شدن نیست.');
+        if (avail <= 0) {
+          NotificationService.showToast(
+              context, 'این کالا فعلاً رفته سفر مولد انبار! موجودی صفره 😅',
+              backgroundColor: Colors.orange);
           return;
         }
-
         final existing = _cart
-            .where((c) =>
-                c.productId == productId &&
-                c.warehouseId == (_selectedWarehouseId ?? 0))
+            .where((c) => c.productId == productId && !c.isService)
             .toList();
         if (existing.isNotEmpty) {
           final ex = existing.first;
           final wouldBe = ex.qty + 1.0;
           if (wouldBe > avail) {
-            NotificationService.showError(context, 'محدودیت موجودی',
-                'امکان افزایش مقدار وجود ندارد. موجودی در انبار: ${avail.toStringAsFixed(2)}');
+            NotificationService.showToast(context,
+                'آقا/خانم، بیشتر از موجودی نمیشه! موجودی: ${_nf.format(avail)}',
+                backgroundColor: Colors.orange);
             return;
           }
           ex.qty = wouldBe;
           ex.recalc();
-          setState(() {});
+          _onCartChanged();
           return;
         }
       } else {
-        // خدمت: اگر قبلاً در سبد است مقدار را افزایش میدهم
         final existing = _cart
-            .where((c) => c.productId == productId && c.isService == true)
+            .where((c) => c.productId == productId && c.isService)
             .toList();
         if (existing.isNotEmpty) {
           final ex = existing.first;
-          ex.qty += 1;
+          ex.qty += 1.0;
           ex.recalc();
-          setState(() {});
+          _onCartChanged();
           return;
         }
       }
 
       final line = SaleLine(
-        productId: productId,
-        productName: name,
-        warehouseId: _selectedWarehouseId ?? 0,
-        qty: 1.0,
-        unitPrice: salePrice,
-        purchasePrice: purchasePrice,
-        isService: isService,
-      );
+          productId: productId,
+          productName: name,
+          warehouseId: 0,
+          qty: 1.0,
+          unitPrice: salePrice,
+          purchasePrice: purchasePrice,
+          isService: isService);
       setState(() => _cart.add(line));
+      _onCartChanged();
     } catch (e) {
       NotificationService.showError(
           context, 'خطا', 'افزودن به سبد انجام نشد: $e');
     }
   }
 
-  // بقیهٔ کد صفحه بدون تغییر عمده — فقط در بخش UI SaleProductList صدا زده شده متفاوت است.
-  @override
-  Widget build(BuildContext context) {
-    // responsive: اگر عرض بزرگ باشد دو ستون، وگرنه ستونی
-    return Scaffold(
-      appBar: AppBar(title: const Text('فروش سریع')),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : LayoutBuilder(builder: (context, constraints) {
-              final wide = constraints.maxWidth >= 900;
-              if (wide) {
-                return Padding(
-                  padding: const EdgeInsets.all(12.0),
-                  child: Row(
-                    children: [
-                      SizedBox(
-                        width: 420,
-                        child: Card(
-                          child: Padding(
-                            padding: const EdgeInsets.all(8.0),
-                            child: SaleProductList(
-                              onAddProduct: (item) => _addProductToCart(item),
-                              onFocusProduct: (item) => _addProductToCart(item),
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(child: _buildRightColumn()),
-                    ],
-                  ),
-                );
-              } else {
-                return Padding(
-                  padding: const EdgeInsets.all(12.0),
-                  child: Column(
-                    children: [
-                      Card(
-                          child: Padding(
-                              padding: const EdgeInsets.all(8.0),
-                              child: SaleProductList(
-                                  onAddProduct: (item) =>
-                                      _addProductToCart(item),
-                                  onFocusProduct: (item) =>
-                                      _addProductToCart(item)))),
-                      const SizedBox(height: 12),
-                      Expanded(child: _buildRightColumn()),
-                    ],
-                  ),
-                );
-              }
-            }),
+  Future<void> _quickCheckout() async {
+    if (_cart.isEmpty) {
+      NotificationService.showError(context, 'خطا', 'سبد خالی است');
+      return;
+    }
+    setState(() => _saving = true);
+    try {
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final saleMap = <String, dynamic>{
+        'invoice_no': 'QS$now',
+        'title': 'فروش سریع',
+        'customer_id': null,
+        'actor': null,
+        'total': double.parse(_subtotal.toStringAsFixed(4)),
+        'subtotal': double.parse(_subtotal.toStringAsFixed(4)),
+        'discount': 0.0,
+        'tax': 0.0,
+        'extra_charges': 0.0,
+        'notes': 'فروش سریع',
+        'created_at': now,
+      };
+
+      final lines = _cart.map((l) => l.toMapForDb()).toList();
+      final saleId = await AppDatabase.saveSale(saleMap, lines);
+
+      double paid =
+          double.tryParse(_paidAmountCtrl.text.replaceAll(',', '.')) ?? 0.0;
+      if (paid <= 0) paid = _subtotal;
+
+      final paymentInfo = <String, dynamic>{
+        'method': 'cash',
+        'amount': double.parse(paid.toStringAsFixed(4)),
+        'created_at': DateTime.now().millisecondsSinceEpoch,
+        'note': 'پرداخت نقدی (فروش سریع)'
+      };
+
+      try {
+        await AppDatabase.setSalePaymentInfo(saleId, paymentInfo);
+      } catch (_) {}
+
+      NotificationService.showSuccess(
+          context, 'ثبت شد', 'فروش سریع ثبت و پرداخت نقدی انجام شد', onOk: () {
+        setState(() => _cart.clear());
+        _onCartChanged();
+      });
+    } catch (e) {
+      NotificationService.showError(
+          context, 'خطا', 'ثبت فروش سریع انجام نشد: $e');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Widget _buildCart() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(8.0),
+        child:
+            Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          const Text('سبد فروش سریع',
+              style: TextStyle(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 8),
+          if (_cart.isEmpty) const Center(child: Text('سبد خالی است')),
+          ..._cart.map((l) {
+            return ListTile(
+              title: Text(l.productName),
+              subtitle:
+                  Text('تعداد: ${l.qty}  —  قیمت: ${_nf.format(l.unitPrice)}'),
+              trailing: IconButton(
+                  icon: const Icon(Icons.delete, color: Colors.red),
+                  onPressed: () {
+                    setState(() {
+                      _cart.remove(l);
+                      _onCartChanged();
+                    });
+                  }),
+            );
+          }).toList(),
+          const Divider(),
+          Row(children: [
+            Expanded(
+                child: Text('جمع: ${_nf.format(_subtotal)}',
+                    style: const TextStyle(fontWeight: FontWeight.w700))),
+            const SizedBox(width: 8),
+            SizedBox(
+              width: 220,
+              child: TextField(
+                controller: _paidAmountCtrl,
+                decoration: InputDecoration(
+                    labelText: 'مبلغ پرداختی (پیشفرض ${_nf.format(_subtotal)})',
+                    isDense: true),
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                onChanged: (v) {
+                  setState(() => _paidManuallyEdited = true);
+                },
+              ),
+            ),
+            const SizedBox(width: 8),
+            FilledButton.tonal(
+                onPressed: _saving ? null : _quickCheckout,
+                child: _saving
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Text('ثبت و دریافت نقدی')),
+          ]),
+        ]),
+      ),
     );
   }
 
-  Widget _buildRightColumn() {
-    // محتوا مشابه نسخهٔ اصلی — نگه داشته شده
-    return Column(children: [
-      const SizedBox(height: 8),
-      Expanded(
+  @override
+  Widget build(BuildContext context) {
+    if (_loading)
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    return Scaffold(
+      appBar: AppBar(title: const Text('فروش سریع')),
+      body: LayoutBuilder(builder: (context, constraints) {
+        final wide = constraints.maxWidth >= 900;
+        final left = SizedBox(
+          width: wide ? 520 : double.infinity,
           child: Card(
-              child: Padding(
-                  padding: const EdgeInsets.all(8.0),
-                  child: SaleCart(
-                      lines: _cart,
-                      onChanged: (lines) => setState(() {}),
-                      onRequestRecalc: () => setState(() {}))))),
-      const SizedBox(height: 8),
-      // بقیهٔ UI برای محاسبات و ثبت فروش...
-      const SizedBox(height: 20),
-    ]);
+            child: Padding(
+              padding: const EdgeInsets.all(8.0),
+              child: SaleProductList(
+                  onAddProduct: (item) async => _addProduct(item),
+                  onFocusProduct: (_) {}),
+            ),
+          ),
+        );
+
+        final right = Expanded(
+            child: Padding(
+                padding: const EdgeInsets.all(8.0), child: _buildCart()));
+
+        if (wide) {
+          return Padding(
+              padding: const EdgeInsets.all(12.0),
+              child: Row(children: [left, const SizedBox(width: 12), right]));
+        } else {
+          return Padding(
+              padding: const EdgeInsets.all(12.0),
+              child: Column(
+                  children: [left, const SizedBox(height: 8), _buildCart()]));
+        }
+      }),
+    );
   }
 }

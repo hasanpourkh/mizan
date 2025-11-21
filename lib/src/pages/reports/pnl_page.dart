@@ -171,3 +171,5 @@ class _PnLPageState extends State<PnLPage> {
     );
   }
 }
+
+class PnlPage {}

@@ -1,31 +1,26 @@
-//github.com/nimshakiba/mizan/blob/main/lib/src/pages/sales/sale_product_list.dart
+//github.com/hasanpourkh/mizan/blob/main/lib/src/pages/sales/sale_product_list.dart
 // lib/src/pages/sales/sale_product_list.dart
-// لیست محصولات/خدمات داخل صفحهٔ فروش (قابل استفاده هم در پنل بزرگ و هم حالت compact)
-// - تغییر مهم: اکنون هم محصولات و هم خدمات را نشان میدهد (با is_service flag).
-// - onAddProduct و onFocusProduct اکنون Map<String,dynamic> میگیرند (آیتم کامل).
-// - خدمات بدون موجودی هستند؛ بنابراین روی اضافه‌سازی کنترل موجودی اعمال نمیشود.
-// - کامنت فارسی مختصر برای هر بخش وجود دارد.
+// ویجت فهرست محصولات/خدمات برای صفحات فروش.
+// - نمایش نام، قیمت و برای محصولات «موجودی فعلی»
+// - برای خدمات متن «خدمت — تعداد نامحدود» نمایش داده میشود.
+// - دکمهٔ افزودن: قبل از افزودن برای محصول بررسی موجودی انجام میشود.
+// - پیام خطا/موفقیت با NotificationService به صورت خودمانی/خنده‌دار نمایش داده میشود.
+// - کامنت فارسی مختصر در سراسر فایل قرار دارد.
 
 import 'package:flutter/material.dart';
 import '../../core/db/app_database.dart';
 import '../../core/notifications/notification_service.dart';
-import '../../core/utils/number_formatters.dart';
+import 'package:intl/intl.dart';
 
-typedef OnAddProduct = void Function(Map<String, dynamic> item);
+typedef OnAddProduct = Future<void> Function(Map<String, dynamic> item);
 typedef OnFocusProduct = void Function(Map<String, dynamic> item);
 
 class SaleProductList extends StatefulWidget {
-  // compact: وقتی true است آیتمها و فیلد جستجو جمعوجورتر نمایش داده میشوند (موبایل/پنجره کوچک)
-  final bool compact;
   final OnAddProduct onAddProduct;
-  final OnFocusProduct onFocusProduct;
+  final OnFocusProduct? onFocusProduct;
 
-  const SaleProductList({
-    super.key,
-    required this.onAddProduct,
-    required this.onFocusProduct,
-    this.compact = false,
-  });
+  const SaleProductList(
+      {super.key, required this.onAddProduct, this.onFocusProduct});
 
   @override
   State<SaleProductList> createState() => _SaleProductListState();
@@ -36,29 +31,23 @@ class _SaleProductListState extends State<SaleProductList> {
   List<Map<String, dynamic>> _filtered = [];
   bool _loading = true;
   String _q = '';
-  final TextEditingController _searchCtrl = TextEditingController();
+  final NumberFormat _nf = NumberFormat.decimalPattern();
 
   @override
   void initState() {
     super.initState();
-    _load();
-    _searchCtrl.addListener(_onSearchChanged);
+    _loadItems();
   }
 
-  Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _items = [];
-      _filtered = [];
-    });
+  Future<void> _loadItems() async {
+    setState(() => _loading = true);
     try {
       final items = await AppDatabase.getSellableItems();
       _items = items;
       _applyFilter();
     } catch (e) {
-      NotificationService.showToast(
-          context, 'بارگذاری محصولات/خدمات انجام نشد: $e',
-          backgroundColor: Colors.orange);
+      NotificationService.showError(
+          context, 'خطا', 'بارگذاری آیتم‌ها انجام‌نشد: $e');
       _items = [];
       _filtered = [];
     } finally {
@@ -66,167 +55,170 @@ class _SaleProductListState extends State<SaleProductList> {
     }
   }
 
-  void _onSearchChanged() {
-    setState(() {
-      _q = _searchCtrl.text.trim();
-      _applyFilter();
-    });
-  }
-
   void _applyFilter() {
-    final q = _q.toLowerCase();
+    final q = _q.trim().toLowerCase();
     if (q.isEmpty) {
       _filtered = List<Map<String, dynamic>>.from(_items);
     } else {
-      _filtered = _items.where((r) {
-        final name = r['name']?.toString().toLowerCase() ?? '';
-        final sku = r['sku']?.toString().toLowerCase() ?? '';
-        final code = r['code']?.toString().toLowerCase() ?? '';
+      _filtered = _items.where((it) {
+        final name = (it['name']?.toString() ?? '').toLowerCase();
+        final sku = (it['sku']?.toString() ?? '').toLowerCase();
+        final code =
+            (it['code']?.toString() ?? it['product_code']?.toString() ?? '')
+                .toLowerCase();
         return name.contains(q) || sku.contains(q) || code.contains(q);
       }).toList();
     }
   }
 
-  String _formatPrice(dynamic p) {
-    final price =
-        (p is num) ? p.toDouble() : double.tryParse(p?.toString() ?? '') ?? 0.0;
-    // اگر عدد صحیح است بدون اعشار نشان بده، وگرنه دو رقم اعشار
-    final frac = (price == price.roundToDouble()) ? 0 : 2;
-    return formatAmount(price, fractionDigits: frac);
+  // متدی که برای هر آیتم، قبل از اضافه کردن بررسی میکند (مخصوصا برای محصولات)
+  Future<void> _handleAddTap(Map<String, dynamic> item) async {
+    try {
+      final isService = item['is_service'] == true;
+      final idRaw = item['id'];
+      final id =
+          (idRaw is int) ? idRaw : int.tryParse(idRaw?.toString() ?? '') ?? 0;
+      if (!isService) {
+        final avail = await AppDatabase.getQtyForItemInWarehouse(id, 0);
+        if (avail <= 0) {
+          // پیام طنزآمیز و خودمانی
+          NotificationService.showToast(context,
+              'اوپس! موجودی این کالا صفره — انگار همه‌ش رو گورخرها بردن 😅\nفعلاً نمیشه اضافه‌ش کنی.',
+              backgroundColor: Colors.orange);
+          return;
+        }
+        // اگر موجودی هست، اضافه کن
+        await widget.onAddProduct(item);
+        NotificationService.showToast(
+            context, 'به سبد اضافه شد (موجودی: ${_nf.format(avail)})');
+      } else {
+        // خدمت — نامحدود
+        await widget.onAddProduct(item);
+        NotificationService.showToast(context,
+            'خدمت اضافه شد — همین حالا می‌تونی هر چند تا خواستی ثبت کنی 🎉');
+      }
+    } catch (e) {
+      NotificationService.showError(context, 'خطا', 'افزودن انجام نشد: $e');
+    }
   }
 
-  @override
-  void dispose() {
-    _searchCtrl.removeListener(_onSearchChanged);
-    _searchCtrl.dispose();
-    super.dispose();
+  Widget _buildItemTile(Map<String, dynamic> it) {
+    final name = it['name']?.toString() ?? '—';
+    final priceVal = (it['price'] is num)
+        ? (it['price'] as num).toDouble()
+        : double.tryParse(it['price']?.toString() ?? '') ?? 0.0;
+    final isService = it['is_service'] == true;
+
+    return FutureBuilder<double>(
+      future: isService
+          ? Future.value(double.infinity)
+          : AppDatabase.getQtyForItemInWarehouse(
+              (it['id'] is int)
+                  ? it['id'] as int
+                  : int.tryParse(it['id']?.toString() ?? '') ?? 0,
+              0),
+      builder: (context, snap) {
+        String subtitle;
+        if (isService) {
+          subtitle = 'خدمت — تعداد نامحدود';
+        } else {
+          if (snap.connectionState == ConnectionState.waiting) {
+            subtitle = 'بارگیری موجودی...';
+          } else if (snap.hasError) {
+            subtitle = 'موجودی: نا‌مشخص';
+          } else {
+            final avail = snap.data ?? 0.0;
+            subtitle = 'موجودی: ${_nf.format(avail)}';
+          }
+        }
+
+        return ListTile(
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          leading: CircleAvatar(
+            child: Text((it['sku']?.toString() ?? '').isNotEmpty
+                ? it['sku']!.toString().substring(0, 1).toUpperCase()
+                : name.isNotEmpty
+                    ? name[0]
+                    : '?'),
+          ),
+          title: Row(children: [
+            Expanded(
+                child: Text(name,
+                    style: const TextStyle(fontWeight: FontWeight.w600))),
+            const SizedBox(width: 8),
+            Text('${_nf.format(priceVal)}',
+                style: const TextStyle(fontWeight: FontWeight.w700)),
+          ]),
+          subtitle: Text(subtitle),
+          trailing: SizedBox(
+            width: 110,
+            child: Row(children: [
+              IconButton(
+                tooltip: 'جزئیات',
+                icon: const Icon(Icons.info_outline),
+                onPressed: () {
+                  if (widget.onFocusProduct != null) widget.onFocusProduct!(it);
+                },
+              ),
+              FilledButton.tonal(
+                onPressed: () => _handleAddTap(it),
+                child: const Text('افزودن'),
+              ),
+            ]),
+          ),
+        );
+      },
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final small = widget.compact;
-    final searchHeight = small ? 40.0 : 48.0;
-    final titleStyle =
-        TextStyle(fontSize: small ? 14.0 : 16.0, fontWeight: FontWeight.w600);
-    final subtitleStyle =
-        TextStyle(fontSize: small ? 12.0 : 13.0, color: Colors.grey[700]);
-
-    return SizedBox(
-      // در حالت compact ارتفاع کمتر، در غیر اینصورت انعطافپذیر
-      height: small ? 380 : null,
-      child: Column(
-        children: [
-          // فیلد جستجو کوچک یا بزرگ بسته به compact
-          SizedBox(
-            height: searchHeight,
-            child: TextField(
-              controller: _searchCtrl,
-              decoration: InputDecoration(
-                prefixIcon: const Icon(Icons.search),
-                hintText: 'جستجو محصولات/خدمات (نام / SKU / کد)',
-                isDense: true,
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8.0)),
-                contentPadding: const EdgeInsets.symmetric(
-                    vertical: 10.0, horizontal: 12.0),
+    return Card(
+      child: SizedBox(
+        height: 520,
+        child: Column(children: [
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: Row(children: [
+              Expanded(
+                child: TextField(
+                  decoration: const InputDecoration(
+                      prefixIcon: Icon(Icons.search),
+                      hintText: 'جستجو محصول/خدمت (نام/کد/SKU)'),
+                  onChanged: (v) {
+                    setState(() {
+                      _q = v;
+                      _applyFilter();
+                    });
+                  },
+                ),
               ),
-            ),
+              const SizedBox(width: 8),
+              FilledButton.tonal(
+                  onPressed: _loadItems, child: const Text('بارگذاری مجدد')),
+            ]),
           ),
-          const SizedBox(height: 8),
+          const Divider(height: 1),
           Expanded(
-            child: Card(
-              child: _loading
-                  ? const Center(child: CircularProgressIndicator())
-                  : _filtered.isEmpty
-                      ? const Center(
-                          child: Padding(
-                              padding: EdgeInsets.all(12.0),
-                              child: Text('موردی یافت نشد')))
-                      : ListView.separated(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : _filtered.isEmpty
+                    ? const Center(
+                        child: Padding(
+                            padding: EdgeInsets.all(12.0),
+                            child: Text('هیچ آیتمی یافت نشد')))
+                    : Scrollbar(
+                        child: ListView.separated(
+                          padding: const EdgeInsets.symmetric(vertical: 6),
                           itemCount: _filtered.length,
                           separatorBuilder: (_, __) => const Divider(height: 1),
-                          itemBuilder: (ctx, idx) {
-                            final p = _filtered[idx];
-                            final id = (p['id'] is int)
-                                ? p['id'] as int
-                                : int.tryParse(p['id']?.toString() ?? '') ?? 0;
-                            final name = p['name']?.toString() ?? '';
-                            final sku = p['sku']?.toString() ?? '';
-                            final priceText = _formatPrice(p['price']);
-                            final isService = (p['is_service'] == true);
-                            final leadingIcon = isService
-                                ? Icons.miscellaneous_services
-                                : Icons.inventory_2;
-                            final priceSmall = Text(priceText,
-                                style: TextStyle(
-                                    fontWeight: FontWeight.w700,
-                                    fontSize: small ? 13.0 : 14.0));
-                            return ListTile(
-                              dense: small,
-                              minVerticalPadding: small ? 4.0 : 8.0,
-                              leading: Icon(leadingIcon, size: small ? 18 : 22),
-                              title: Text(name, style: titleStyle),
-                              subtitle: Text(
-                                  isService
-                                      ? 'خدمت' +
-                                          (sku.isNotEmpty ? ' · $sku' : '')
-                                      : (sku.isNotEmpty ? 'SKU: $sku' : ''),
-                                  style: subtitleStyle),
-                              trailing: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  // نمایش قیمت کنار دکمهٔ افزودن
-                                  Padding(
-                                    padding: EdgeInsets.only(
-                                        left: small ? 8.0 : 12.0),
-                                    child: priceSmall,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  IconButton(
-                                    icon: Icon(Icons.add_shopping_cart,
-                                        size: small ? 18 : 22),
-                                    tooltip: 'افزودن به فاکتور',
-                                    onPressed: () {
-                                      try {
-                                        widget.onAddProduct(p);
-                                        NotificationService.showToast(
-                                            context, 'آیتم اضافه شد',
-                                            backgroundColor: Colors.green);
-                                      } catch (_) {
-                                        widget.onAddProduct(p);
-                                      }
-                                    },
-                                  ),
-                                ],
-                              ),
-                              onTap: () {
-                                widget.onAddProduct(p);
-                                NotificationService.showToast(
-                                    context, 'آیتم اضافه شد',
-                                    backgroundColor: Colors.green);
-                                widget.onFocusProduct(p);
-                              },
-                            );
-                          },
+                          itemBuilder: (ctx, idx) =>
+                              _buildItemTile(_filtered[idx]),
                         ),
-            ),
+                      ),
           ),
-          const SizedBox(height: 6),
-          Row(
-            children: [
-              FilledButton.tonal(
-                  onPressed: _load, child: const Text('بارگذاری مجدد')),
-              const SizedBox(width: 8),
-              OutlinedButton(
-                  onPressed: () {
-                    // پاکسازی فیلد جستجو
-                    _searchCtrl.clear();
-                    FocusScope.of(context).unfocus();
-                  },
-                  child: const Text('پاکسازی')),
-            ],
-          )
-        ],
+        ]),
       ),
     );
   }

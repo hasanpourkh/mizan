@@ -6,3 +6,4 @@
 export 'database_init.dart';
 export 'database_facade.dart';
 export 'database_schema.dart';
+export 'database_facade.dart';

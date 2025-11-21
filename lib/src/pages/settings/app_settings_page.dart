@@ -1,9 +1,9 @@
 // lib/src/pages/settings/app_settings_page.dart
-// صفحهٔ تنظیمات برنامه — به‌روزرسانی: افزودن تنظیمات شمارهٔ فاکتور (prefix/start/counter/title)
-// - کاربران میتوانند پیشوند فاکتور، عدد شروع و کانتر فعلی و عنوان پیشفرض فاکتور را تنظیم کنند.
-// - تنظیمات با ConfigManager ذخیره میشوند.
-// - سایر تنظیمات قبلی (storage_path, db_path, barcode seed/counter) حفظ شده‌اند.
-// کامنت فارسی مختصر برای هر بخش قرار دارد.
+// صفحهٔ تنظیمات برنامه — نسخهٔ کامل‌شده با فیلدهای جدید برای "قالب تولید کد خدمات"
+// - فیلدهای اضافه شده:
+//    service_code_prefix, service_code_start, service_code_counter
+// - این فایل تمام امکانات قبلی (مسیر ذخیره، مسیر دیتابیس، بارکد seed/counter، شماره فاکتور) را حفظ کرده
+// - کامنت فارسی مختصر برای هر بخش قرار دارد.
 
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -36,6 +36,13 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
       TextEditingController(text: '1000');
   final TextEditingController _invoiceCounterCtrl = TextEditingController();
   final TextEditingController _invoiceTitleCtrl = TextEditingController();
+
+  // تنظیمات کد خدمات (جدید)
+  final TextEditingController _servicePrefixCtrl =
+      TextEditingController(text: 'SVC');
+  final TextEditingController _serviceStartCtrl =
+      TextEditingController(text: '1000');
+  final TextEditingController _serviceCounterCtrl = TextEditingController();
 
   bool _loading = true;
   String? _initialDbPath;
@@ -82,6 +89,14 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
     _invoiceCounterCtrl.text = invCounter;
     _invoiceTitleCtrl.text = invTitle;
 
+    // load service code settings (new)
+    final svcPrefix = await ConfigManager.get('service_code_prefix') ?? 'SVC';
+    final svcStart = await ConfigManager.get('service_code_start') ?? '1000';
+    final svcCounter = await ConfigManager.get('service_code_counter') ?? '';
+    _servicePrefixCtrl.text = svcPrefix;
+    _serviceStartCtrl.text = svcStart;
+    _serviceCounterCtrl.text = svcCounter;
+
     setState(() => _loading = false);
   }
 
@@ -123,7 +138,7 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
     setState(() {});
   }
 
-  // ذخیرهٔ تنظیمات (شامل ذخیره barcode seed/counter و تنظیمات فاکتور در ConfigManager)
+  // ذخیرهٔ تنظیمات (شامل تنظیمات service code جدید)
   Future<void> _save() async {
     setState(() => _loading = true);
     try {
@@ -136,6 +151,11 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
       final invoiceStart = _invoiceStartCtrl.text.trim();
       final invoiceCounter = _invoiceCounterCtrl.text.trim();
       final invoiceTitle = _invoiceTitleCtrl.text.trim();
+
+      // service code settings
+      final servicePrefix = _servicePrefixCtrl.text.trim();
+      final serviceStart = _serviceStartCtrl.text.trim();
+      final serviceCounter = _serviceCounterCtrl.text.trim();
 
       final cfg = <String, dynamic>{};
       if (storagePath.isNotEmpty) cfg['storage_path'] = storagePath;
@@ -150,6 +170,12 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
       if (invoiceStart.isNotEmpty) cfg['invoice_start'] = invoiceStart;
       if (invoiceCounter.isNotEmpty) cfg['invoice_counter'] = invoiceCounter;
       if (invoiceTitle.isNotEmpty) cfg['invoice_title'] = invoiceTitle;
+
+      // service code settings (new)
+      if (servicePrefix.isNotEmpty) cfg['service_code_prefix'] = servicePrefix;
+      if (serviceStart.isNotEmpty) cfg['service_code_start'] = serviceStart;
+      if (serviceCounter.isNotEmpty)
+        cfg['service_code_counter'] = serviceCounter;
 
       await ConfigManager.saveConfig(cfg);
 
@@ -251,6 +277,9 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
     _invoiceStartCtrl.dispose();
     _invoiceCounterCtrl.dispose();
     _invoiceTitleCtrl.dispose();
+    _servicePrefixCtrl.dispose();
+    _serviceStartCtrl.dispose();
+    _serviceCounterCtrl.dispose();
     super.dispose();
   }
 
@@ -366,26 +395,69 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
                                 controller: _invoiceTitleCtrl,
                                 decoration: const InputDecoration(
                                     labelText:
-                                        'عنوان پیش‌فرض فاکتور (مثلاً "فروش نقدی")',
+                                        'عنوان پیشفرض فاکتور (مثلاً "فروش نقدی")',
                                     border: OutlineInputBorder()))),
                       ]),
                       const SizedBox(height: 12),
+
+                      // بخش جدید: تنظیمات کد خدمات
+                      const Divider(height: 28),
+                      const Text('تنظیمات تولید کد خدمات',
+                          style: TextStyle(fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 8),
+                      Row(children: [
+                        Expanded(
+                            child: TextField(
+                                controller: _servicePrefixCtrl,
+                                decoration: const InputDecoration(
+                                    labelText:
+                                        'پیشوند کد خدمت (مثلاً SVC یا S-)',
+                                    border: OutlineInputBorder()))),
+                        const SizedBox(width: 8),
+                        Expanded(
+                            child: TextField(
+                                controller: _serviceStartCtrl,
+                                decoration: const InputDecoration(
+                                    labelText: 'عدد شروع (مثلاً 1000)',
+                                    border: OutlineInputBorder()),
+                                keyboardType: TextInputType.number)),
+                      ]),
+                      const SizedBox(height: 8),
+                      Row(children: [
+                        Expanded(
+                            child: TextField(
+                                controller: _serviceCounterCtrl,
+                                decoration: const InputDecoration(
+                                    labelText:
+                                        'کانتر فعلی (خالی بگذارید تا از عدد شروع استفاده شود)',
+                                    border: OutlineInputBorder()),
+                                keyboardType: TextInputType.number)),
+                        const SizedBox(width: 8),
+                        Expanded(
+                            child: OutlinedButton(
+                                onPressed: () {
+                                  // بازنشانی کانتر نمونه
+                                  setState(() {
+                                    _serviceCounterCtrl.text = '';
+                                  });
+                                },
+                                child: const Text('پاکسازی کانتر'))),
+                      ]),
+                      const SizedBox(height: 12),
                       const Text(
-                          'توضیح: شمارهٔ فاکتور بر اساس ترکیب پیشوند + کانتر ساخته میشود. اگر کانتر خالی باشد از عدد شروع استفاده میشود. پس از هر تولید کانتر ذخیره و یک واحد افزایش می‌یابد.',
+                          'توضیح: کد خدمات بر اساس ترکیب پیشوند + کانتر ساخته می‌شود. کانتر پس از هر ذخیرهٔ خدمت افزایش می‌یابد.',
                           style: TextStyle(color: Colors.black54)),
                       const SizedBox(height: 16),
-                      Row(
-                        children: [
-                          Expanded(
-                              child: FilledButton.tonal(
-                                  onPressed: _save,
-                                  child: const Text('ذخیره تنظیمات'))),
-                          const SizedBox(width: 12),
-                          OutlinedButton(
-                              onPressed: _load,
-                              child: const Text('بارگذاری مجدد')),
-                        ],
-                      ),
+                      Row(children: [
+                        Expanded(
+                            child: FilledButton.tonal(
+                                onPressed: _save,
+                                child: const Text('ذخیره تنظیمات'))),
+                        const SizedBox(width: 12),
+                        OutlinedButton(
+                            onPressed: _load,
+                            child: const Text('بارگذاری مجدد')),
+                      ]),
                     ],
                   ),
                 ),

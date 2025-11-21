@@ -57,7 +57,7 @@ class _SaleCartState extends State<SaleCart> {
     if (line.productId == null) return 0.0;
     try {
       final avail = await AppDatabase.getQtyForItemInWarehouse(
-          line.productId!, line.warehouseId);
+          line.productId, line.warehouseId);
       return avail;
     } catch (_) {
       return 0.0;
