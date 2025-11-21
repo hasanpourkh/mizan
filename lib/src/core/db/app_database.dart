@@ -27,9 +27,10 @@ import 'daos/inventory_dao.dart' as inventory_dao;
 import 'daos/warehouses_dao.dart' as warehouses_dao;
 import 'daos/sales_dao.dart' as sales_dao;
 
+
 // خدمات (services) — اگر فایل موجود نیست باید lib/src/core/db/daos/services_dao.dart اضافه شود
 import 'daos/services_dao.dart' as services_dao;
-
+import 'db_migrations.dart' as db_migrations;
 // NOTE: این فایل دیگر چیزی را re-export نمیکند تا از ambiguous_export جلوگیری شود.
 
 class AppDatabase {
@@ -42,57 +43,40 @@ class AppDatabase {
 
   // ---------- init محافظهکارانه و خودکار ----------
   static Future<void> init() async {
-    if (_db != null) return;
+  if (_db != null) return;
 
-    try {
-      final cfgPath = await ConfigManager.getDbFilePath();
-      if (cfgPath != null && cfgPath.trim().isNotEmpty) {
-        _dbFilePath = cfgPath;
-        await _openDatabaseAtPath(_dbFilePath!);
-        // اطمینان از وجود جداول جدید اگر DB از قبل موجود بوده باشد
-        await _ensureReturnsAndProfitTables();
-        // مهاجرت خدمات اگر نیاز داشته باشد
-        try {
-          final d = await db;
-          await services_dao.migrateServicesTable(d);
-        } catch (_) {}
-        // مهاجرت schema برای sales (اضافه کردن ستونهایی مانند title)
-        try {
-          final d = await db;
-          await _migrateSalesSchema(d);
-        } catch (_) {}
-        return;
-      }
-    } catch (_) {}
-
-    String? candidate;
-    try {
-      candidate = await _computeInstallFolderPath();
-    } catch (_) {
-      candidate = null;
-    }
-
-    if (candidate != null) {
+  try {
+    final cfgPath = await ConfigManager.getDbFilePath();
+    if (cfgPath != null && cfgPath.trim().isNotEmpty) {
+      _dbFilePath = cfgPath;
+      await _openDatabaseAtPath(_dbFilePath!);
+      // اطمینان از وجود جداول جدید اگر DB از قبل موجود بوده باشد
+      await _ensureReturnsAndProfitTables();
+      // مهاجرت خدمات اگر نیاز داشته باشد
       try {
-        await setDbPath(candidate);
-        // setDbPath خودش _ensure را اجرا میکند
-        // migrate services table
-        try {
-          final d = await db;
-          await services_dao.migrateServicesTable(d);
-        } catch (_) {}
-        // migrate sales schema
-        try {
-          final d = await db;
-          await _migrateSalesSchema(d);
-        } catch (_) {}
-        return;
+        final d = await db;
+        await services_dao.migrateServicesTable(d);
       } catch (_) {}
+      // مهاجرت schema برای sales (اضافه کردن ستونهایی مانند title)
+      try {
+        final d = await db;
+        await db_migrations.runSalesRelatedMigrations(d);
+      } catch (_) {}
+      return;
     }
+  } catch (_) {}
 
+  String? candidate;
+  try {
+    candidate = await _computeInstallFolderPath();
+  } catch (_) {
+    candidate = null;
+  }
+
+  if (candidate != null) {
     try {
-      final fallback = await _computeAppSupportPath();
-      await setDbPath(fallback);
+      await setDbPath(candidate);
+      // setDbPath خودش _ensure را اجرا میکند
       // migrate services table
       try {
         final d = await db;
@@ -101,14 +85,31 @@ class AppDatabase {
       // migrate sales schema
       try {
         final d = await db;
-        await _migrateSalesSchema(d);
+        await db_migrations.runSalesRelatedMigrations(d);
       } catch (_) {}
       return;
-    } catch (e) {
-      throw Exception(
-          'عدم امکان تعیین مسیر دیتابیس بهصورت خودکار: $e. لطفاً مجوزهای فایل/پوشه را بررسی کنید.');
-    }
+    } catch (_) {}
   }
+
+  try {
+    final fallback = await _computeAppSupportPath();
+    await setDbPath(fallback);
+    // migrate services table
+    try {
+      final d = await db;
+      await services_dao.migrateServicesTable(d);
+    } catch (_) {}
+    // migrate sales schema
+    try {
+      final d = await db;
+      await db_migrations.runSalesRelatedMigrations(d);
+    } catch (_) {}
+    return;
+  } catch (e) {
+    throw Exception(
+        'عدم امکان تعیین مسیر دیتابیس بهصورت خودکار: $e. لطفاً مجوزهای فایل/پوشه را بررسی کنید.');
+  }
+}
 
   // مسیر کنار executable برای دسکتاپ
   static Future<String?> _computeInstallFolderPath() async {
@@ -1192,8 +1193,11 @@ class AppDatabase {
             perc = _toDouble(sp);
           } else {
             try {
-              final pid = (p['id'] is int) ? p['id'] as int : int.tryParse(p['id']?.toString() ?? '') ?? 0;
-              final sp2 = await persons_meta_dao.getPersonSharePercentage(d, pid);
+              final pid = (p['id'] is int)
+                  ? p['id'] as int
+                  : int.tryParse(p['id']?.toString() ?? '') ?? 0;
+              final sp2 =
+                  await persons_meta_dao.getPersonSharePercentage(d, pid);
               perc = sp2;
             } catch (_) {}
           }
